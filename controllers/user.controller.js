@@ -1,6 +1,8 @@
 const { ObjectId } = require("mongodb");
 const { v4: uuidv4 } = require("uuid");
 const User = require("../models/user.model");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 // GET ALL USER API  ==================
 const getAllUsers = async (req, res) => {
@@ -16,7 +18,6 @@ const getAllUsers = async (req, res) => {
 const getOneUser = async (req, res) => {
   try {
     const id = req.params.id;
-    console.log(id);
     const query = { _id: new ObjectId(id) };
     const result = await User.findOne(query);
     if (result) {
@@ -29,31 +30,92 @@ const getOneUser = async (req, res) => {
   }
 };
 
-// GET REGISTER POST API  ==================
-const createUser = async (req, res) => {
+ // GET REGISTER POST API  ==================
+
+ const saltRounds = 10;
+
+ const createUser = async (req, res) => {
   try {
-    const newUser = new User({
-      id: uuidv4(),
-      name: req.body.name,
-      password: req.body.password,
+    const user = await User.findOne({ email: req.body.email });
+    if (user) return res.status(400).send("User already exists");
+    bcrypt.hash(req.body.password, saltRounds, async (err, hash) => {
+      const newUser = new User({
+        name: req.body.name,
+        email: req.body.email,
+        password: hash,
+      });
+      await newUser
+        .save()
+        .then((user) => {
+          const payload = {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+          };
+        
+          const token = jwt.sign(payload, process.env.SECRET_KEY, {
+            expiresIn: "2d",
+          });
+
+          res.send({
+            success: true,
+            message: "User is created Successfully",
+            user: {
+              id: user._id,
+              name: user.name,
+              email: user.email,
+              token: "Bearer " + token
+            },
+          });
+        })
+        .catch((error) => {
+          res.send({
+            success: false,
+            message: "User is not created",
+            error: error,
+          });
+        });
     });
-    await newUser.save();
-    return res.status(201).json(newUser);
   } catch (error) {
     res.status(500).send(error.message);
   }
 };
 
-// GET LOGIN POST API  ==================
+
+// // GET LOGIN POST API  ==================
+
 const loginUser = async (req, res) => {
   try {
-    const newUser = new User({
-      id: uuidv4(),
-      name: req.body.name,
-      password: req.body.password,
+    const user = await User.findOne({ email: req.body.email });
+  if (!user) {
+    return res.status(401).send({
+      success: false,
+      message: "User is not found",
     });
-    await newUser.save();
-    res.status(201).json(newUser);
+  }
+
+  if (!bcrypt.compareSync(req.body.password, user.password)) {
+    return res.status(401).send({
+      success: false,
+      message: "Incorrect password",
+    });
+  }
+
+  const payload = {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+  };
+
+  const token = jwt.sign(payload, process.env.SECRET_KEY, {
+    expiresIn: "2d",
+  });
+
+  return res.status(200).send({
+    success: true,
+    message: "User is logged in successfully",
+    token: "Bearer " + token,
+  });
   } catch (error) {
     res.status(500).send(error.message);
   }
@@ -69,6 +131,7 @@ const updateUser = async (req, res) => {
     const updateDoc = {
       $set: {
         name: data.name,
+        email: data.email,
         password: data.password,
       },
     };
@@ -97,7 +160,7 @@ const updateUser = async (req, res) => {
 const deleteUser = async (req, res) => {
   try {
     const id = req.params.id;
-    const query = { _id: new ObjectId(id) };
+    const query = { _id: new ObjectId(id)};
     await User.deleteOne(query);
     res.status(200).json({ message: "user is deleted" });
   } catch (error) {
@@ -113,3 +176,5 @@ module.exports = {
   updateUser,
   deleteUser,
 };
+
+
